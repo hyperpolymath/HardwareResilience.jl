@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: PMPL-1.0-or-later
+# Clade declaration — part of the gv-clade-index registry
+# See: https://github.com/hyperpolymath/gv-clade-index
+
+[identity]
+uuid = "ef2eb132-93b1-5dec-be9d-d18619a595c6"
+primary-forge = "github"
+primary-owner = "hyperpolymath"
+canonical-name = "HardwareResilience.jl"
+prefixed-name = "ix-HardwareResilience.jl"
+
+[clade]
+primary = "ix"
+secondary = []
+assigned = "2026-03-16"
+rationale = ""
+
+[forges]
+github = "hyperpolymath/HardwareResilience.jl"
+gitlab = "hyperpolymath/HardwareResilience.jl"
+bitbucket = "hyperpolymath/HardwareResilience.jl"
+
+[lineage]
+type = "standalone"
+parent = "Julia package — hardware resilience testing"
+born = "2026-03-16"
