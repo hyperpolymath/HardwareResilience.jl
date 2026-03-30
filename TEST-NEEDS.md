@@ -1,0 +1,30 @@
+# TEST-NEEDS: HardwareResilience.jl
+
+## Current State
+
+| Category | Count | Details |
+|----------|-------|---------|
+| **Source modules** | 1 | 633 lines |
+| **Test files** | 1 | 80 lines, 28 @test/@testset |
+| **Benchmarks** | 0 | None |
+
+## What's Missing
+
+- [ ] **Performance**: Hardware resilience with 0 benchmarks -- failure recovery time is critical
+- [ ] **Error handling**: No tests for actual hardware failure scenarios, degraded modes
+
+### Benchmarks Needed
+- [ ] Failover latency
+- [ ] Degradation detection time
+
+## FLAGGED ISSUES
+- **28 tests for 633 source lines = 4.4 tests per 100 lines** -- thin for reliability code
+- **Resilience library with no failure injection tests** -- can't verify it's actually resilient
+
+## Priority: P2 (MEDIUM) -- reliability code needs more testing
+
+## FAKE-FUZZ ALERT
+
+- `tests/fuzz/placeholder.txt` is a scorecard placeholder inherited from rsr-template-repo — it does NOT provide real fuzz testing
+- Replace with an actual fuzz harness (see rsr-template-repo/tests/fuzz/README.adoc) or remove the file
+- Priority: P2 — creates false impression of fuzz coverage
