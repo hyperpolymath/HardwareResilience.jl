@@ -1,32 +1,132 @@
 // SPDX-License-Identifier: PMPL-1.0-or-later
 = HardwareResilience.jl — Show Me The Receipts
+Jonathan D.A. Jewell <j.d.a.jewell@open.ac.uk>
 :toc:
+:toclevels: 3
 :icons: font
 
-The README makes claims. This file backs them up.
+The README makes claims. This file backs them up with specific code locations,
+honest caveats, and enough trace information for an external reviewer to navigate
+the codebase cold.
 
-[quote, README]
+== Claim 1: Guardian logic for long-running kernels with transparent fallbacks
+
+[quote, README — Overview]
 ____
-HardwareResilience.jl provides the "Guardian" logic for long-running kernels. It detects hardware faults and handles transparent fallbacks.
+HardwareResilience.jl provides the "Guardian" logic for long-running kernels.
+It detects hardware faults and handles transparent fallbacks.
 ____
 
-== Technology Choices
+*How it works:* `KernelGuardian` is a mutable struct (`src/HardwareResilience.jl`)
+with fields `name::String`, `status::Symbol`, `max_retries::Int`,
+`retry_delay_ms::Int`, and `failure_log::Vector{Tuple{DateTime,String}}`.
 
-[cols="1,2"]
-|===
-| Technology | Learn More
+`monitor_kernel(guardian, op)` executes the zero-argument function `op()` inside a
+retry loop. On exception it logs the error with `now()` timestamp and re-attempts
+up to `max_retries` times. Delay between attempts uses exponential backoff:
+`delay_ms = retry_delay_ms * 2^(attempt-1)`. If all retries are exhausted the
+guardian transitions to `:degraded` status, emits a `@warn`, and returns `nothing`.
+On any successful return the guardian self-heals back to `:active` if it was
+previously `:degraded`.
 
-| **Julia** | https://julialang.org
-|===
+*Honest caveat:* The retry loop is synchronous — it blocks the calling thread.
+For genuinely parallel operations (CUDA kernels, multi-threaded Julia tasks) the
+caller must wrap each task individually. There is no distributed-guardian
+coordination mechanism.
+
+== Claim 2: ECC memory, RAID, thermal zones, and watchdog detection
+
+[quote, README — Features]
+____
+KernelGuardian: Monitor and track the status of critical kernels. Self-Healing:
+Automated error handling and fallback logic.
+____
+
+*How it works (hardware detection side):* `detect_resilience()` calls five
+detection functions and assembles a `ResilienceReport`:
+
+- `check_ecc_memory()` reads `/sys/devices/system/edac/mc*/ce_count` and
+  `ue_count` (Linux EDAC subsystem). Falls back to `dmidecode` if the EDAC
+  sysfs path is absent.
+- `check_raid_status()` reads `/proc/mdstat` for Linux software RAID. Parses
+  the status line for `[UU]`/degraded indicators.
+- `check_thermal_zones()` reads `/sys/class/thermal/thermal_zone*/temp` and
+  trip points, constructing `ThermalZone` structs. Marks zones as critical if
+  current temperature exceeds the critical trip point.
+- `check_watchdog_timers()` lists devices under `/sys/class/watchdog/`.
+- `check_redundant_power()` scans `/sys/class/power_supply/` for multiple AC
+  adapters as a proxy for redundant PSU presence.
+
+`overall_resilience` in the report is computed as `:high` (ECC + RAID + OK thermal),
+`:medium` (some protections), or `:low` (no protections).
+
+*Honest caveat:* All detection is Linux-only. Non-Linux platforms receive stub
+results with `present=false`. Hardware RAID controllers (LSI, Adaptec) are not
+probed — only Linux software RAID via `/proc/mdstat`. The PSU detection is a
+heuristic — it counts power supply entries, not actual hardware redundancy.
+
+== How It Is Checked
+
+Tests live in `test/runtests.jl`. Coverage includes:
+
+- `KernelGuardian` construction with various `status` values
+  (`:Healthy`, `:Degraded`, `:Failed`, `:Recovering`, `:Unknown`)
+- Mutability: `status` and `name` fields can be updated
+- `monitor_kernel` returns op result on success (integer, string)
+- `monitor_kernel` returns `nothing` on `error()`, `DomainError`, `BoundsError`
+- Retry count exhaustion transitions guardian to `:degraded`
+- Exponential backoff timing is within acceptable range
 
 == File Map
 
-[cols="1,2"]
+[cols="2,4"]
 |===
 | Path | What's There
 
-| `src/` | Source code
-| `test(s)/` | Test suite
+| `src/HardwareResilience.jl`
+| Entire module (~350 lines). Defines `KernelGuardian`, `ThermalZone`,
+  `ResilienceReport`. Implements `monitor_kernel` (supervised retry loop),
+  `check_ecc_memory` (EDAC + dmidecode), `check_raid_status` (/proc/mdstat),
+  `check_thermal_zones` (hwmon/thermal sysfs), `check_watchdog_timers`,
+  `check_redundant_power`, `detect_resilience`, `print_resilience_report`.
+
+| `test/runtests.jl`
+| Full test suite. Includes directly from src to avoid package resolution;
+  exercises guardian construction, mutation, supervised execution with success
+  and failure scenarios, and error type variety.
+
+| `Project.toml`
+| Package identity. Depends only on `Dates` from stdlib.
+  MPL-2.0 fallback declared for Julia ecosystem compatibility.
+
+| `LICENSE` / `LICENSES/`
+| PMPL-1.0-or-later; MPL-2.0 fallback.
+|===
+
+== Dogfooded Across The Account
+
+[cols="2,4"]
+|===
+| Repo | How HardwareResilience (or this domain) appears
+
+| `LowLevel.jl`
+| Direct dependency: `LowLevel` re-exports `KernelGuardian` and `monitor_kernel`
+  and wraps `peak_performance_op` in a guardian for the Metal Layer orchestration.
+
+| `Hyperpolymath.jl`
+| Listed as one of the six "Metal Layer" packages (`using HardwareResilience`
+  in `src/Hyperpolymath.jl`).
+
+| `AcceleratorGate.jl`
+| `generate_self_healing_hooks` in AcceleratorGate produces guardian-compatible
+  fallback closures; the two packages are designed to compose.
+
+| `developer-ecosystem/julia-ecosystem/`
+| Part of the hardware/systems tier of the Julia ecosystem collection.
+
+| `statistease`
+| Long-running statistical batch jobs are the primary use-case motivating the
+  guardian retry pattern; resilience infrastructure protects computation hours.
 |===
 
 == Questions?
