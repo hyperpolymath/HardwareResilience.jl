@@ -4,7 +4,11 @@
 
 using Test
 
-include(joinpath(@__DIR__, "..", "src", "HardwareResilience.jl"))
+# Load the module only when this file is run on its own. runtests.jl has
+# already loaded it; including it again replaces the module and leaves Main
+# with two conflicting `KernelGuardian` bindings (an UndefVarError on 1.12).
+isdefined(@__MODULE__, :HardwareResilience) ||
+    include(joinpath(@__DIR__, "..", "src", "HardwareResilience.jl"))
 using .HardwareResilience
 
 @testset "Property-Based Tests" begin

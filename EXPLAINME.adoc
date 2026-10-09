@@ -26,9 +26,12 @@ with fields `name::String`, `status::Symbol`, `max_retries::Int`,
 retry loop. On exception it logs the error with `now()` timestamp and re-attempts
 up to `max_retries` times. Delay between attempts uses exponential backoff:
 `delay_ms = retry_delay_ms * 2^(attempt-1)`. If all retries are exhausted the
-guardian transitions to `:degraded` status, emits a `@warn`, and returns `nothing`.
-On any successful return the guardian self-heals back to `:active` if it was
-previously `:degraded`.
+guardian transitions to `:Degraded` status, emits a `@warn`, and returns `nothing`.
+On any successful return the guardian self-heals back to `:Healthy` if it was
+previously `:Degraded`. A new guardian starts `:Healthy`, or in the `status`
+passed to `KernelGuardian(name, status)`. The status vocabulary is `:Healthy`,
+`:Degraded`, `:Failed`, `:Recovering` and `:Unknown`; `monitor_kernel` sets only
+`:Degraded` and `:Healthy`, and the caller sets the others.
 
 *Honest caveat:* The retry loop is synchronous — it blocks the calling thread.
 For genuinely parallel operations (CUDA kernels, multi-threaded Julia tasks) the
@@ -68,15 +71,16 @@ heuristic — it counts power supply entries, not actual hardware redundancy.
 
 == How It Is Checked
 
-Tests live in `test/runtests.jl`. Coverage includes:
+Tests live in `test/runtests.jl`, which also runs `test/e2e_test.jl` and
+`test/property_test.jl`. Coverage includes:
 
 - `KernelGuardian` construction with various `status` values
   (`:Healthy`, `:Degraded`, `:Failed`, `:Recovering`, `:Unknown`)
 - Mutability: `status` and `name` fields can be updated
 - `monitor_kernel` returns op result on success (integer, string)
 - `monitor_kernel` returns `nothing` on `error()`, `DomainError`, `BoundsError`
-- Retry count exhaustion transitions guardian to `:degraded`
-- Exponential backoff timing is within acceptable range
+- Retry count exhaustion transitions guardian to `:Degraded`, and the next
+  success returns it to `:Healthy`
 
 == File Map
 
