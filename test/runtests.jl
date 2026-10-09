@@ -29,6 +29,34 @@ using .HardwareResilience
         end
     end
 
+    @testset "KernelGuardian keyword and positional forms agree" begin
+        g = KernelGuardian("default_test")
+        @test g.status === :Healthy
+        @test g.max_retries == 3
+        @test g.retry_delay_ms == 100
+        @test isempty(g.failure_log)
+
+        g = KernelGuardian("kw_test"; status=:Recovering, max_retries=5, retry_delay_ms=7)
+        @test g.status === :Recovering
+        @test g.max_retries == 5
+        @test g.retry_delay_ms == 7
+
+        g = KernelGuardian("pos_kw_test", :Unknown; max_retries=2, retry_delay_ms=1)
+        @test g.status === :Unknown
+        @test g.max_retries == 2
+        @test g.retry_delay_ms == 1
+    end
+
+    @testset "monitor_kernel status transitions use the guardian vocabulary" begin
+        g = KernelGuardian("transition_test", :Healthy; retry_delay_ms=1)
+        result = @test_logs (:warn, r"exhausted retries") monitor_kernel(g, () -> error("fault"))
+        @test result === nothing
+        @test g.status === :Degraded
+        @test length(g.failure_log) == g.max_retries
+        @test monitor_kernel(g, () -> :recovered) === :recovered
+        @test g.status === :Healthy
+    end
+
     @testset "monitor_kernel returns op result on success" begin
         g = KernelGuardian("monitor_test", :Healthy)
         result = monitor_kernel(g, () -> 42)

@@ -44,16 +44,26 @@ export check_redundant_power, print_resilience_report
 # ============================================================================
 
 """
-    KernelGuardian(name, status, max_retries, retry_delay_ms, failure_log)
+    KernelGuardian(name; status=:Healthy, max_retries=3, retry_delay_ms=100)
+    KernelGuardian(name, status; max_retries=3, retry_delay_ms=100)
 
 A supervised execution monitor that wraps operations with retry logic,
 failure logging, and self-healing capabilities.
 
+# Status vocabulary
+`status` is one of `:Healthy`, `:Degraded`, `:Failed`, `:Recovering` or
+`:Unknown`. A new guardian starts `:Healthy` unless another status is given.
+`monitor_kernel` sets `:Degraded` when an operation exhausts its retries, and
+returns a `:Degraded` guardian to `:Healthy` on its next successful operation.
+The other states are set by the caller (for example a supervisor marking a
+guardian `:Recovering` while it repairs a fault); `monitor_kernel` leaves them
+unchanged.
+
 # Fields
 - `name`: identifier for this guardian instance
-- `status`: current status (`:active`, `:degraded`, `:failed`)
-- `max_retries`: maximum retry attempts before marking as failed
-- `retry_delay_ms`: milliseconds between retry attempts
+- `status`: current status, from the vocabulary above
+- `max_retries`: maximum attempts before the guardian is marked `:Degraded`
+- `retry_delay_ms`: delay before the first retry; it doubles on each further retry
 - `failure_log`: timestamped log of failures encountered
 """
 mutable struct KernelGuardian
@@ -63,13 +73,20 @@ mutable struct KernelGuardian
     retry_delay_ms::Int
     failure_log::Vector{Tuple{DateTime, String}}
 
-    function KernelGuardian(name::String; max_retries::Int=3, retry_delay_ms::Int=100)
-        new(name, :active, max_retries, retry_delay_ms, Tuple{DateTime, String}[])
+    function KernelGuardian(name::String; status::Symbol=:Healthy,
+                            max_retries::Int=3, retry_delay_ms::Int=100)
+        new(name, status, max_retries, retry_delay_ms, Tuple{DateTime, String}[])
     end
 end
 
-# Backward-compatible constructor for (name, status) form
-KernelGuardian(name::String, status::Symbol) = KernelGuardian(name; max_retries=3)
+"""
+    KernelGuardian(name::String, status::Symbol; max_retries=3, retry_delay_ms=100)
+
+Create a guardian that starts in `status`. This positional form is equivalent
+to `KernelGuardian(name; status=status, ...)` and accepts the same keywords.
+"""
+KernelGuardian(name::String, status::Symbol; kwargs...) =
+    KernelGuardian(name; status=status, kwargs...)
 
 """
     ThermalZone
@@ -114,9 +131,11 @@ end
     monitor_kernel(guardian::KernelGuardian, op::Function) -> Any
 
 Execute an operation under the guardian's supervision. If the operation fails,
-it is retried up to `guardian.max_retries` times with exponential backoff.
-Failures are logged with timestamps. If all retries are exhausted, the
-guardian transitions to `:degraded` status and returns `nothing`.
+it is attempted up to `guardian.max_retries` times in all, with exponential
+backoff between attempts. Failures are logged with timestamps. If all attempts
+fail, the guardian transitions to `:Degraded` status and returns `nothing`.
+A successful operation returns a `:Degraded` guardian to `:Healthy`; any other
+status is left unchanged.
 
 # Arguments
 - `guardian`: the `KernelGuardian` supervising this operation
@@ -129,9 +148,9 @@ function monitor_kernel(g::KernelGuardian, op)
     for attempt in 1:g.max_retries
         try
             result = op()
-            # Successful execution: ensure guardian is active
-            if g.status == :degraded
-                g.status = :active
+            # Successful execution heals a degraded guardian
+            if g.status === :Degraded
+                g.status = :Healthy
             end
             return result
         catch e
@@ -143,9 +162,9 @@ function monitor_kernel(g::KernelGuardian, op)
                 delay_ms = g.retry_delay_ms * (2 ^ (attempt - 1))
                 sleep(delay_ms / 1000.0)
             else
-                g.status = :degraded
+                g.status = :Degraded
                 @warn "KernelGuardian '$(g.name)' exhausted retries ($(g.max_retries)). " *
-                      "Status: degraded. Last error: $err_msg"
+                      "Status: Degraded. Last error: $err_msg"
                 return nothing
             end
         end
