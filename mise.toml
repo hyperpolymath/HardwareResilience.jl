@@ -3,9 +3,6 @@
 zig = "latest"
 bun = "latest"
 
-# Package managers
-go-task = "latest"
-
 # Formatting & Linting
 shfmt = "latest"
 stylua = "latest"
